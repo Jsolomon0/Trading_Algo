@@ -1,0 +1,37 @@
+npm install firebase
+
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { getAnalytics } from "firebase/analytics";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyBbQoWmfRDAJt1R8ibyNlVNcs6vsW1f2ZQ",
+  authDomain: "bms0-e8e23.firebaseapp.com",
+  projectId: "bms0-e8e23",
+  storageBucket: "bms0-e8e23.firebasestorage.app",
+  messagingSenderId: "482484256876",
+  appId: "1:482484256876:web:fb82f3ea3122929c665849",
+  measurementId: "G-9VVBCQVC8M"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
+
+npm install -g firebase-tools
+
+
+Sign in to Google
+firebase login
+Initiate your project
+Run this command from your app's root directory:
+
+firebase init
+When you're ready, deploy your web app
+Put your static files (e.g., HTML, CSS, JS) in your app's deploy directory (the default is "public"). Then, run this command from your app's root directory:
+
+firebase deploy

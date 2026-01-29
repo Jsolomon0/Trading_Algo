@@ -1,0 +1,154 @@
+# Deep Reinforcement Learning Trading System with LSTM
+
+A complete Deep Reinforcement Learning (DRL) trading system using LSTM neural networks for cryptocurrency trading on Alpaca Markets.
+
+## 🎯 System Overview
+
+This system combines:
+- **LSTM Neural Networks**: For temporal pattern recognition in market data
+- **Actor-Critic Architecture**: For policy learning and value estimation
+- **Proximal Policy Optimization (PPO)**: Stable and efficient RL algorithm
+- **Ichimoku Cloud Features**: Six sophisticated technical indicators
+- **Real-time Trading**: Live data streaming from Alpaca API
+
+## 📁 Project Structure
+
+```
+├── drl_agent.py                  # Core DRL agent implementation
+├── alpaca_drl_integration.py     # Live trading integration
+├── train_backtest.py             # Training and backtesting script
+├── .env                          # API credentials (not in repo)
+└── drl_trading_model.pth         # Trained model weights
+```
+
+## 🚀 Quick Start
+
+### 1. Installation
+
+```bash
+# Install required packages
+pip install torch numpy pandas alpaca-py python-dotenv matplotlib nest-asyncio
+
+# Clone the repository
+git clone <your-repo>
+cd drl-trading-system
+```
+
+### 2. Environment Setup
+
+Create a `.env` file with your Alpaca API credentials:
+
+```env
+ALPACA_API_KEY_ID=your_api_key_here
+ALPACA_API_SECRET_KEY=your_secret_key_here
+```
+
+### 3. Train the Agent
+
+```bash
+python train_backtest.py
+```
+
+This will:
+- Fetch 30 days of historical BTC/USD data
+- Train the agent for 100 episodes
+- Backtest the trained model
+- Save the model as `drl_trading_model.pth`
+- Generate performance visualizations
+
+### 4. Run Live Trading
+
+```bash
+python alpaca_drl_integration.py
+```
+
+This will:
+- Load the pre-trained model (if available)
+- Subscribe to live minute bars
+- Make real-time trading decisions
+- Continue training online
+- Display performance metrics
+
+## 🧠 Architecture Details
+
+### LSTM Actor-Critic Network
+
+```
+Input: (batch, sequence_length=30, features=6)
+    ↓
+LSTM Layers (2 layers, hidden_size=128)
+    ↓
+    ├─→ Actor Head → Action Probabilities [Buy, Sell, Hold]
+    └─→ Critic Head → State Value Estimate
+```
+
+### Ichimoku Cloud Features
+
+1. **Price-Cloud Position**: Position relative to Kumo cloud (+1, 0, -1)
+2. **Normalized Distance**: Distance from cloud normalized by price
+3. **TK Cross**: Tenkan-sen/Kijun-sen crossover signal
+4. **Kumo Twist**: Future cloud bullish/bearish status
+5. **Cloud Thickness**: Normalized cloud thickness (volatility proxy)
+6. **Chikou Position**: Lagging span vs historical price
+
+### Reward Function
+
+The environment calculates rewards based on:
+- **Profitable trades**: Positive reward for correct position
+- **Transaction costs**: -0.1% per trade
+- **Position holding**: Reward for maintaining profitable positions
+- **Risk management**: Large penalty for excessive losses
+
+## 📊 Training Configuration
+
+```python
+# Agent Parameters
+input_size = 6                    # Ichimoku features
+hidden_size = 128                 # LSTM hidden dimension
+num_lstm_layers = 2               # Number of LSTM layers
+sequence_length = 30              # Historical time steps
+learning_rate = 0.0001            # Adam optimizer learning rate
+gamma = 0.99                      # Discount factor
+epsilon = 0.2                     # PPO clipping parameter
+
+# Training Parameters
+num_episodes = 100                # Training episodes
+max_steps_per_episode = 1000      # Max steps per episode
+batch_size = 32                   # Training batch size
+epochs_per_batch = 4              # PPO epochs per update
+```
+
+## 🎮 Action Space
+
+The agent can take three discrete actions:
+
+| Action | Value | Description |
+|--------|-------|-------------|
+| BUY    | 0     | Enter long position or close short |
+| SELL   | 1     | Enter short position or close long |
+| HOLD   | 2     | Maintain current position |
+
+## 📈 Performance Metrics
+
+The system tracks:
+- **Total Rewards**: Cumulative reward over time
+- **Portfolio Value**: Current portfolio worth
+- **Win Rate**: Percentage of profitable trades
+- **Number of Trades**: Total buy/sell actions taken
+- **Sharpe Ratio**: Risk-adjusted returns (in backtest)
+
+## 🔄 Training vs Live Trading
+
+### Training Mode (`train_backtest.py`)
+- Uses historical data
+- Explores different strategies (stochastic actions)
+- Trains on batches of experiences
+- Evaluates performance on backtest
+- Saves best model
+
+### Live Trading Mode (`alpaca_drl_integration.py`)
+- Uses real-time streaming data
+- Can use deterministic or stochastic actions
+- Continues online learning
+- Saves model periodically
+- Tracks live performance

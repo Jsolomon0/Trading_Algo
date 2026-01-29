@@ -1,0 +1,211 @@
+def select_action(self, state_sequence, deterministic=False):
+        """
+        Select an action given the current state sequence.
+        
+        Args:
+            state_sequence: Numpy array of shape (sequence_length, input_size)
+            deterministic: If True, select the action with highest probability
+            
+        Returns:
+            action: Selected action (0=Buy, 1=Sell, 2=Hold)
+            action_name: Action name string
+            action_prob: Probability of selected action
+        """
+        self.network.eval()
+        
+        with torch.no_grad():
+            # 1. Convert to tensor
+            if isinstance(state_sequence, np.ndarray):
+                # Standard input from environment (2D: [sequence_length, input_size])
+                state_tensor = torch.FloatTensor(state_sequence).unsqueeze(0).to(self.device)
+                # Add the required batch dimension (3D: [batch_size, sequence_length, input_size])
+                state_tensor = state_tensor.unsqueeze(0)
+            else:
+                # Input from testing (already 3D tensor: [batch_size, sequence_length, input_size])
+                state_tensor = state_sequence.to(self.device)
+            
+            # 2. **CRITICAL FIX: Ensure 3D shape before model forward pass**
+            # This removes any accidental extra batch dimensions (e.g., changing [1, 1, 30, 6] to [1, 30, 6])
+            state_tensor = state_tensor.squeeze()
+            if state_tensor.dim() == 2:
+                # If squeezing reduced it to 2D ([30,6]), add the batch dimension back
+                state_tensor = state_tensor.unsqueeze(0)
+                           
+            # --- ORIGINAL CODE ---
+            # Convert to tensor and add batch dimension
+            # state_tensor = torch.FloatTensor(state_sequence).unsqueeze(0).to(self.device)
+            
+            # Get action probabilities
+            action_probs, _, self.hidden = self.network(state_tensor, self.hidden)
+            action_probs = action_probs.squeeze(0)
+            
+            if deterministic:
+                action = torch.argmax(action_probs).item()
+            else:
+                # Sample from the probability distribution
+                action = torch.multinomial(action_probs, 1).item()
+            
+            action_prob = action_probs[action].item()
+        
+        return action, self.action_map[action], action_prob
+    
+    def select_action1(self, state_sequence, deterministic=False, temperature=1.0):
+
+        """ Args:
+          temperature: Higher = more random, Lower = more decisive,
+            Use 0.5 for more confident decisions
+            Use 1.0 for normal
+            Use 2.0 for more exploration"""
+        self.network.eval()
+    
+        with torch.no_grad():
+            state_tensor = self._prepare_input(state_sequence)
+            action_probs, _, self.hidden = self.network(state_tensor, self.hidden)
+            action_probs = action_probs.squeeze(0)
+        
+        # Apply temperature scaling
+            if temperature != 1.0:
+                action_probs = torch.pow(action_probs, 1.0 / temperature)
+                action_probs = action_probs / action_probs.sum()
+        
+            if deterministic:
+                action = action_probs.argmax().item()
+            else:
+                action = torch.multinomial(action_probs, 1).item()
+        
+        return action, self.action_map[action], action_probs[action].item()
+    
+
+
+
+
+
+
+def calculate_reward0(self, action, current_price, prev_price):
+        reward = 0
+        done = False
+        
+        price_change = (current_price - prev_price) / prev_price
+        
+        # BUY action (0)
+        if action == 0:
+            if self.position == 0:  # Enter long
+                self.position = 1
+                self.entry_price = current_price
+                reward = -self.transaction_cost * 0.1  # Reduce transaction cost penalty
+            elif self.position == 1:  # Already long - reward holding
+                reward = price_change * 100  # AMPLIFY reward for price increase
+            elif self.position == -1:  # Close short, enter long
+                pnl = (self.entry_price - current_price) / self.entry_price
+                reward = pnl * 100 - self.transaction_cost * 2
+                self.position = 1
+                self.entry_price = current_price
+        
+        # SELL action (1)
+        elif action == 1:
+            if self.position == 0:  # Enter short
+                self.position = -1
+                self.entry_price = current_price
+                reward = -self.transaction_cost * 0.1
+            elif self.position == -1:  # Already short - reward holding
+                reward = -price_change * 100  # AMPLIFY reward for price decrease
+            elif self.position == 1:  # Close long, enter short
+                pnl = (current_price - self.entry_price) / self.entry_price
+                reward = pnl * 100 - self.transaction_cost * 2
+                self.position = -1
+                self.entry_price = current_price
+        
+        # HOLD action (2)
+        elif action == 2:
+            if self.position == 1:  # Holding long
+                reward = price_change * 50  # Reward for price increase
+            elif self.position == -1:  # Holding short
+                reward = -price_change * 50  # Reward for price decrease
+            else:  # No position - PENALIZE inaction
+                reward = -0.1  # Significant penalty for doing nothing
+        
+        # Update portfolio value
+        if self.position == 1:
+            self.portfolio_value = self.balance + (current_price - self.entry_price) / self.entry_price * self.balance
+        elif self.position == -1:
+            self.portfolio_value = self.balance + (self.entry_price - current_price) / self.entry_price * self.balance
+        else:
+            self.portfolio_value = self.balance
+        
+        # Check if should end episode
+        if self.portfolio_value < self.initial_balance * 0.5:
+            done = True
+            reward -= 100  # Large penalty for losing too much
+        
+        return reward, done
+
+    def calculate_reward1(self, action, current_price, prev_price):
+        """
+        Calculate reward based on action and price movement.
+        
+        Args:
+            action: 0=Buy, 1=Sell, 2=Hold
+            current_price: Current asset price
+            prev_price: Previous asset price
+            
+        Returns:
+            reward: Calculated reward value
+            done: Whether episode is done
+        """
+        reward = 0
+        done = False
+        
+        price_change = (current_price - prev_price) / prev_price
+        
+        # BUY action
+        if action == 0:
+            if self.position == 0:  # Enter long position
+                self.position = 1
+                self.entry_price = current_price
+                reward = -self.transaction_cost  # Transaction cost
+            elif self.position == 1:  # Already long
+                reward = price_change  # Reward for holding profitable position
+            elif self.position == -1:  # Close short and enter long
+                pnl = (self.entry_price - current_price) / self.entry_price
+                reward = pnl - 2 * self.transaction_cost
+                self.position = 1
+                self.entry_price = current_price
+        
+        # SELL action
+        elif action == 1:
+            if self.position == 0:  # Enter short position
+                self.position = -1
+                self.entry_price = current_price
+                reward = -self.transaction_cost
+            elif self.position == -1:  # Already short
+                reward = -price_change  # Reward for profitable short
+            elif self.position == 1:  # Close long and enter short
+                pnl = (current_price - self.entry_price) / self.entry_price
+                reward = pnl - 2 * self.transaction_cost
+                self.position = -1
+                self.entry_price = current_price
+        
+        # HOLD action
+        elif action == 2:
+            if self.position == 1:  # Holding long
+                reward = price_change * 0.5  # Partial reward for holding
+            elif self.position == -1:  # Holding short
+                reward = -price_change * 0.5
+            else:  # No position
+                reward = -0.0001  # Small penalty for inaction
+        
+        # Update portfolio value
+        if self.position == 1:
+            self.portfolio_value = self.balance + (current_price - self.entry_price) / self.entry_price * self.balance
+        elif self.position == -1:
+            self.portfolio_value = self.balance + (self.entry_price - current_price) / self.entry_price * self.balance
+        else:
+            self.portfolio_value = self.balance
+        
+        # Check if episode should end (e.g., excessive loss)
+        if self.portfolio_value < self.initial_balance * 0.5:
+            done = True
+            reward -= 10  # Large penalty for losing too much
+        
+        return reward, done
+#

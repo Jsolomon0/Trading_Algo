@@ -1,0 +1,8 @@
+2025-10-08 18:58:47,516 - INFO - Database initialized at bitcoin_sentiment.db
+2025-10-08 18:58:57,015 - INFO - Search query: ("$BTC" OR "#Bitcoin" OR "Bitcoin" OR "$btc" OR "#bitcoin" OR "bitcoin" OR "BTC/USD" OR "BTCUSD" OR "Satoshi" OR "sats" OR "crypto bull run" OR "crypto crash" OR "bitcoin price" OR "BTC price" OR "bitcoin halving") lang:en -is:retweet
+2025-10-08 18:58:57,344 - ERROR - Error searching tweets: 401 Unauthorized
+Unauthorized
+2025-10-08 19:09:26,786 - INFO - Database initialized at bitcoin_sentiment.db
+2025-10-08 19:09:35,925 - INFO - Search query: ("$BTC" OR "#Bitcoin" OR "Bitcoin" OR "$btc" OR "#bitcoin" OR "bitcoin" OR "BTC/USD" OR "BTCUSD" OR "Satoshi" OR "sats" OR "crypto bull run" OR "crypto crash" OR "bitcoin price" OR "BTC price" OR "bitcoin halving") lang:en -is:retweet
+2025-10-08 19:09:36,676 - INFO - Collected 100 tweets
+2025-10-08 19:09:36,683 - INFO - Saved 100 tweets to database

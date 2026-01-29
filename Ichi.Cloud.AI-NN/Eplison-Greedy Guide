@@ -1,0 +1,554 @@
+# ============================================
+# STEP 1: Add to drl_agent.py - DRLTradingAgent class
+# ============================================
+
+class DRLTradingAgent:
+    """
+    Deep Reinforcement Learning Trading Agent using LSTM backbone.
+    """
+    
+    def __init__(
+        self,
+        input_size=6,
+        hidden_size=128,
+        num_lstm_layers=2,
+        sequence_length=30,
+        learning_rate=0.0001,
+        gamma=0.99,
+        epsilon=0.2,
+        device=None
+    ):
+        # ... existing initialization code ...
+        
+        # Add epsilon for epsilon-greedy (NEW)
+        self.epsilon_start = 1.0  # Start with full exploration
+        self.epsilon_end = 0.01   # Minimum exploration
+        self.epsilon_decay = 0.995  # Decay rate
+        self.current_epsilon = self.epsilon_start
+        self.training_steps = 0
+    
+    # ... existing methods ...
+    
+    def select_action(self, state_sequence, deterministic=False, epsilon=None):
+        """
+        Select an action with optional epsilon-greedy exploration.
+        
+        Args:
+            state_sequence: Numpy array of shape (sequence_length, input_size)
+            deterministic: If True, select action with highest probability
+            epsilon: If provided, use epsilon-greedy with this value
+                    If None, use self.current_epsilon during training
+            
+        Returns:
+            action: Selected action (0=Buy, 1=Sell, 2=Hold)
+            action_name: Action name string
+            action_prob: Probability of selected action
+        """
+        # Use epsilon-greedy if epsilon is specified
+        if epsilon is not None and not deterministic:
+            if np.random.random() < epsilon:
+                # Random action (exploration)
+                action = np.random.choice([0, 1, 2])
+                action_name = self.action_map[action]
+                action_prob = 1.0 / 3  # Uniform probability
+                return action, action_name, action_prob
+        
+        # Standard policy-based action selection
+        self.network.eval()
+        
+        with torch.no_grad():
+            state_tensor = self._prepare_input(state_sequence)
+            action_probs, _, self.hidden = self.network(state_tensor, self.hidden)
+            action_probs = action_probs.squeeze(0)
+            
+            if deterministic:
+                action = action_probs.argmax().item()
+            else:
+                action = torch.multinomial(action_probs, 1).item()
+            
+            action_prob = action_probs[action].item()
+        
+        return action, self.action_map[action], action_prob
+    
+    def select_action_epsilon_greedy(self, state_sequence, epsilon=0.1):
+        """
+        Simplified epsilon-greedy action selection.
+        
+        Args:
+            state_sequence: State sequence input
+            epsilon: Exploration probability (0.0 = no exploration, 1.0 = full random)
+            
+        Returns:
+            tuple: (action, action_name, action_prob)
+        """
+        return self.select_action(state_sequence, deterministic=False, epsilon=epsilon)
+    
+    def update_epsilon(self):
+        """
+        Decay epsilon over time (call after each episode).
+        """
+        self.current_epsilon = max(
+            self.epsilon_end,
+            self.current_epsilon * self.epsilon_decay
+        )
+        return self.current_epsilon
+    
+    def get_epsilon_for_training(self, episode, total_episodes):
+        """
+        Calculate epsilon based on training progress.
+        
+        Args:
+            episode: Current episode number
+            total_episodes: Total number of training episodes
+            
+        Returns:
+            float: Epsilon value for this episode
+        """
+        # Linear decay from epsilon_start to epsilon_end
+        progress = episode / total_episodes
+        epsilon = self.epsilon_start - (self.epsilon_start - self.epsilon_end) * progress
+        return max(self.epsilon_end, epsilon)
+
+
+# ============================================
+# STEP 2: Update train_backtest.py - Training Loop
+# ============================================
+
+def train_agent(features_df, num_episodes=100, max_steps_per_episode=1000):
+    """
+    Train the DRL agent with epsilon-greedy exploration.
+    """
+    print("\n" + "="*60)
+    print("TRAINING DRL AGENT (with Epsilon-Greedy)")
+    print("="*60)
+    
+    # Initialize agent
+    agent = DRLTradingAgent(
+        input_size=6,
+        hidden_size=128,
+        num_lstm_layers=2,
+        sequence_length=SEQUENCE_LENGTH,
+        learning_rate=0.0001,
+        gamma=0.99
+    )
+    
+    environment = TradingEnvironment(
+        initial_balance=10000.0,
+        position_size=1.0,
+        transaction_cost=0.001
+    )
+    
+    # Prepare data
+    feature_cols = [col for col in features_df.columns if col != 'close']
+    feature_matrix = features_df[feature_cols].values
+    prices = features_df['close'].values
+    
+    # Training metrics
+    episode_rewards = []
+    episode_portfolio_values = []
+    episode_trades = []
+    epsilon_values = []
+    
+    print(f"\nTraining configuration:")
+    print(f"  Episodes: {num_episodes}")
+    print(f"  Max steps per episode: {max_steps_per_episode}")
+    print(f"  Epsilon decay: {agent.epsilon_start} → {agent.epsilon_end}")
+    print(f"  Device: {agent.device}")
+    print("\nStarting training...\n")
+    
+    for episode in range(num_episodes):
+        # Reset environment and agent
+        environment.reset()
+        agent.reset_hidden_state()
+        
+        # Calculate epsilon for this episode
+        epsilon = agent.get_epsilon_for_training(episode, num_episodes)
+        epsilon_values.append(epsilon)
+        
+        # Random start position
+        max_start = len(feature_matrix) - max_steps_per_episode - SEQUENCE_LENGTH
+        start_idx = np.random.randint(0, max(1, max_start))
+        
+        episode_reward = 0
+        episode_trade_count = 0
+        feature_sequence = deque(maxlen=SEQUENCE_LENGTH)
+        
+        # Initialize sequence
+        for i in range(SEQUENCE_LENGTH):
+            if start_idx + i < len(feature_matrix):
+                feature_sequence.append(feature_matrix[start_idx + i])
+        
+        # Run episode with epsilon-greedy
+        for step in range(max_steps_per_episode):
+            current_idx = start_idx + SEQUENCE_LENGTH + step
+            
+            if current_idx >= len(feature_matrix) - 1:
+                break
+            
+            # Get state
+            state_sequence = np.array(list(feature_sequence))
+            
+            # SELECT ACTION WITH EPSILON-GREEDY (CHANGED)
+            action, action_name, action_prob = agent.select_action_epsilon_greedy(
+                state_sequence,
+                epsilon=epsilon  # Use decaying epsilon
+            )
+            
+            # Get prices
+            current_price = prices[current_idx]
+            prev_price = prices[current_idx - 1]
+            
+            # Calculate reward
+            reward, done = environment.calculate_reward(action, current_price, prev_price)
+            episode_reward += reward
+            
+            # Track trades
+            if action_name != "HOLD":
+                episode_trade_count += 1
+            
+            # Get next state
+            next_features = feature_matrix[current_idx]
+            feature_sequence.append(next_features)
+            next_state_sequence = np.array(list(feature_sequence))
+            
+            # Store transition
+            agent.store_transition(state_sequence, action, reward, next_state_sequence, done)
+            
+            # Train agent
+            if len(agent.replay_buffer) >= 32 and step % 5 == 0:
+                loss = agent.train_step(batch_size=32, epochs=4)
+            
+            if done:
+                break
+        
+        # Store metrics
+        episode_rewards.append(episode_reward)
+        episode_portfolio_values.append(environment.portfolio_value)
+        episode_trades.append(episode_trade_count)
+        
+        # Print progress with epsilon
+        if (episode + 1) % 10 == 0:
+            avg_reward = np.mean(episode_rewards[-10:])
+            avg_portfolio = np.mean(episode_portfolio_values[-10:])
+            avg_trades = np.mean(episode_trades[-10:])
+            print(f"Episode {episode + 1}/{num_episodes} | "
+                  f"Epsilon: {epsilon:.3f} | "
+                  f"Avg Reward: {avg_reward:+.4f} | "
+                  f"Avg Portfolio: ${avg_portfolio:,.2f} | "
+                  f"Avg Trades: {avg_trades:.1f} | "
+                  f"Buffer: {len(agent.replay_buffer)}")
+    
+    # Save model
+    agent.save_model('drl_trading_model.pth')
+    print("\n✓ Training complete! Model saved.")
+    
+    # Plot epsilon decay
+    plt.figure(figsize=(10, 4))
+    plt.plot(epsilon_values)
+    plt.title('Epsilon Decay During Training')
+    plt.xlabel('Episode')
+    plt.ylabel('Epsilon')
+    plt.grid(True)
+    plt.savefig('epsilon_decay.png', dpi=300, bbox_inches='tight')
+    plt.close()
+    print("✓ Epsilon decay plot saved as 'epsilon_decay.png'")
+    
+    return agent, episode_rewards, episode_portfolio_values
+
+
+# ============================================
+# STEP 3: Update train_backtest.py - Backtesting
+# ============================================
+
+def backtest_agent(agent, features_df, mode='greedy', epsilon=0.05):
+    """
+    Backtest with different action selection strategies.
+    
+    Args:
+        agent: Trained DRL agent
+        features_df: Feature dataframe
+        mode: 'deterministic', 'stochastic', 'greedy', or 'adaptive'
+        epsilon: Exploration rate for epsilon-greedy mode
+    """
+    print("\n" + "="*60)
+    print(f"BACKTESTING AGENT - Mode: {mode.upper()}")
+    if mode == 'greedy':
+        print(f"Epsilon: {epsilon}")
+    print("="*60)
+    
+    environment = TradingEnvironment(initial_balance=10000.0)
+    agent.reset_hidden_state()
+    
+    feature_cols = [col for col in features_df.columns if col != 'close']
+    feature_matrix = features_df[feature_cols].values
+    prices = features_df['close'].values
+    
+    feature_sequence = deque(maxlen=SEQUENCE_LENGTH)
+    
+    # Initialize sequence
+    for i in range(SEQUENCE_LENGTH):
+        feature_sequence.append(feature_matrix[i])
+    
+    # Tracking
+    actions_taken = []
+    action_details = []
+    rewards = []
+    portfolio_values = []
+    positions = []
+    
+    # Run backtest
+    for i in range(SEQUENCE_LENGTH, len(feature_matrix)):
+        state_sequence = np.array(list(feature_sequence))
+        
+        # Select action based on mode
+        if mode == 'deterministic':
+            action, action_name, action_prob = agent.select_action(
+                state_sequence, 
+                deterministic=True
+            )
+        elif mode == 'stochastic':
+            action, action_name, action_prob = agent.select_action(
+                state_sequence, 
+                deterministic=False
+            )
+        elif mode == 'greedy':
+            # EPSILON-GREEDY MODE (NEW)
+            action, action_name, action_prob = agent.select_action_epsilon_greedy(
+                state_sequence,
+                epsilon=epsilon
+            )
+        elif mode == 'adaptive':
+            # Adaptive epsilon based on recent performance
+            recent_rewards = rewards[-100:] if len(rewards) >= 100 else rewards
+            avg_recent_reward = np.mean(recent_rewards) if recent_rewards else 0
+            
+            # Increase exploration if performance is poor
+            adaptive_epsilon = 0.01 if avg_recent_reward > 0 else 0.15
+            action, action_name, action_prob = agent.select_action_epsilon_greedy(
+                state_sequence,
+                epsilon=adaptive_epsilon
+            )
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+        
+        # Calculate reward
+        current_price = prices[i]
+        prev_price = prices[i - 1]
+        reward, done = environment.calculate_reward(action, current_price, prev_price)
+        
+        # Track metrics
+        actions_taken.append(action_name)
+        action_details.append({
+            'timestamp': features_df.index[i],
+            'action': action_name,
+            'price': current_price,
+            'confidence': action_prob,
+            'position': environment.position
+        })
+        rewards.append(reward)
+        portfolio_values.append(environment.portfolio_value)
+        positions.append(environment.position)
+        
+        # Update sequence
+        feature_sequence.append(feature_matrix[i])
+    
+    # Calculate statistics
+    total_return = (environment.portfolio_value / environment.initial_balance - 1) * 100
+    num_buys = actions_taken.count('BUY')
+    num_sells = actions_taken.count('SELL')
+    num_holds = actions_taken.count('HOLD')
+    num_trades = num_buys + num_sells
+    
+    print(f"\n{'='*60}")
+    print("BACKTEST RESULTS")
+    print(f"{'='*60}")
+    print(f"Initial Balance: ${environment.initial_balance:,.2f}")
+    print(f"Final Balance: ${environment.portfolio_value:,.2f}")
+    print(f"Total Return: {total_return:+.2f}%")
+    print(f"\nActions Breakdown:")
+    print(f"  Total Steps: {len(actions_taken)}")
+    print(f"  BUY: {num_buys} ({num_buys/len(actions_taken)*100:.1f}%)")
+    print(f"  SELL: {num_sells} ({num_sells/len(actions_taken)*100:.1f}%)")
+    print(f"  HOLD: {num_holds} ({num_holds/len(actions_taken)*100:.1f}%)")
+    print(f"  Total Trades: {num_trades}")
+    print(f"\nCumulative Reward: {sum(rewards):+.4f}")
+    
+    # Buy & Hold comparison
+    buy_hold_return = (prices[-1] / prices[SEQUENCE_LENGTH] - 1) * 100
+    print(f"\nBuy & Hold Return: {buy_hold_return:+.2f}%")
+    print(f"Outperformance: {total_return - buy_hold_return:+.2f}%")
+    print(f"{'='*60}\n")
+    
+    # Show sample trades
+    print("\nSample of Actions Taken:")
+    print("-" * 80)
+    trade_count = 0
+    for detail in action_details:
+        if detail['action'] != 'HOLD' and trade_count < 20:
+            print(f"{detail['timestamp']} | {detail['action']:4s} | "
+                  f"${detail['price']:,.2f} | Conf: {detail['confidence']:.2f} | "
+                  f"Pos: {detail['position']:+d}")
+            trade_count += 1
+    print("-" * 80)
+    
+    return {
+        'actions': actions_taken,
+        'action_details': action_details,
+        'rewards': rewards,
+        'portfolio_values': portfolio_values,
+        'positions': positions,
+        'timestamps': features_df.index[SEQUENCE_LENGTH:]
+    }
+
+
+# ============================================
+# STEP 4: Update train_backtest.py - Main Function
+# ============================================
+
+def main():
+    print("\n" + "="*60)
+    print("DRL TRADING AGENT - TRAINING & BACKTESTING")
+    print("WITH EPSILON-GREEDY EXPLORATION")
+    print("="*60 + "\n")
+    
+    # Fetch and prepare data
+    raw_data = fetch_training_data(days=30)
+    if raw_data is None:
+        return
+    
+    features_df = prepare_features(raw_data)
+    
+    # Train with epsilon-greedy
+    agent, episode_rewards, episode_portfolios = train_agent(
+        features_df,
+        num_episodes=100,
+        max_steps_per_episode=1000
+    )
+    
+    # Backtest with different strategies
+    print("\n" + "="*60)
+    print("COMPARISON: Different Action Selection Strategies")
+    print("="*60)
+    
+    # 1. Deterministic (argmax)
+    results_det = backtest_agent(agent, features_df, mode='deterministic')
+    
+    # 2. Stochastic (sampling from distribution)
+    results_stoch = backtest_agent(agent, features_df, mode='stochastic')
+    
+    # 3. Epsilon-Greedy with 5% exploration (NEW)
+    results_greedy_5 = backtest_agent(agent, features_df, mode='greedy', epsilon=0.05)
+    
+    # 4. Epsilon-Greedy with 10% exploration (NEW)
+    results_greedy_10 = backtest_agent(agent, features_df, mode='greedy', epsilon=0.10)
+    
+    # 5. Adaptive epsilon (NEW)
+    results_adaptive = backtest_agent(agent, features_df, mode='adaptive')
+    
+    # Compare results
+    print("\n" + "="*60)
+    print("STRATEGY COMPARISON SUMMARY")
+    print("="*60)
+    
+    def get_return(results):
+        final_pv = results['portfolio_values'][-1]
+        return (final_pv / 10000 - 1) * 100
+    
+    def count_trades(results):
+        return sum(1 for a in results['actions'] if a != 'HOLD')
+    
+    strategies = [
+        ('Deterministic', results_det),
+        ('Stochastic', results_stoch),
+        ('ε-Greedy (5%)', results_greedy_5),
+        ('ε-Greedy (10%)', results_greedy_10),
+        ('Adaptive ε', results_adaptive)
+    ]
+    
+    for name, results in strategies:
+        ret = get_return(results)
+        trades = count_trades(results)
+        buys = results['actions'].count('BUY')
+        sells = results['actions'].count('SELL')
+        print(f"\n{name:20s}: Return: {ret:+7.2f}% | "
+              f"Trades: {trades:5d} | BUY: {buys:5d} | SELL: {sells:5d}")
+    
+    print(f"{'='*60}\n")
+    
+    # Visualize
+    plot_results(episode_rewards, episode_portfolios, results_greedy_5)
+    
+    print("\n" + "="*60)
+    print("✓ ALL DONE!")
+    print("="*60)
+    print("\nRecommendation: Use ε-greedy with 5-10% exploration for live trading")
+    print("This balances exploitation (using learned policy) and exploration (trying new actions)")
+
+
+# ============================================
+# STEP 5: Update alpaca_drl_with_orders.py - Live Trading
+# ============================================
+
+def make_trading_decision(current_price, prev_price, use_epsilon_greedy=True):
+    """
+    Make a trading decision using epsilon-greedy for live trading.
+    
+    Args:
+        current_price: Current market price
+        prev_price: Previous market price
+        use_epsilon_greedy: If True, use epsilon-greedy (recommended)
+        
+    Returns:
+        tuple: (action_name, action_prob, reward)
+    """
+    global data_store
+    
+    agent = data_store["agent"]
+    environment = data_store["environment"]
+    feature_sequence = data_store["feature_sequence"]
+    
+    if len(feature_sequence) < SEQUENCE_LENGTH:
+        return "HOLD", 0.0, 0.0
+    
+    state_sequence = np.array(list(feature_sequence))
+    
+    # Select action with epsilon-greedy for live trading
+    if use_epsilon_greedy:
+        # Use small epsilon (5%) for live trading - mostly exploit, little explore
+        epsilon = 0.05
+        action, action_name, action_prob = agent.select_action_epsilon_greedy(
+            state_sequence,
+            epsilon=epsilon
+        )
+    else:
+        # Standard stochastic selection
+        action, action_name, action_prob = agent.select_action(
+            state_sequence, 
+            deterministic=False
+        )
+    
+    # Calculate reward
+    reward, done = environment.calculate_reward(action, current_price, prev_price)
+    
+    # Store transition
+    if len(feature_sequence) >= SEQUENCE_LENGTH:
+        next_state = state_sequence
+        agent.store_transition(state_sequence, action, reward, next_state, done)
+    
+    # Update metrics
+    data_store["performance_metrics"]["total_rewards"] += reward
+    data_store["last_action"] = action_name
+    
+    return action_name, action_prob, reward
+
+
+if __name__ == "__main__":
+    # Example usage
+    print("Epsilon-Greedy Integration Complete!")
+    print("\nUsage examples:")
+    print("\n1. Training with epsilon decay:")
+    print("   agent.select_action_epsilon_greedy(state, epsilon=0.1)")
+    print("\n2. Live trading with small epsilon:")
+    print("   agent.select_action_epsilon_greedy(state, epsilon=0.05)")
+    print("\n3. Testing with no exploration:")
+    print("   agent.select_action(state, deterministic=True)")
